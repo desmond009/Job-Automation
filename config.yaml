@@ -1,0 +1,86 @@
+# jobbot settings. Secrets (Gmail app password, Apollo key) go in .env, not here.
+
+# Who you are. Used in email signatures and to pre-fill application forms.
+profile:
+  first_name: Vijender
+  last_name: Yadav
+  email: vijuhmh2004@gmail.com
+  phone: "+91 93521 63317"
+  location: India
+  linkedin: https://www.linkedin.com/in/vijender-yadav-iiit/
+  github: https://github.com/desmond009/
+  website: https://vijender.me
+  school: IIIT Dharwad
+  degree: B.Tech CSE
+  grad_year: 2027
+  current_company: HobbyFi
+
+# One resume per kind of role. Claude picks the best track for each job.
+tracks:
+  fullstack:
+    label: Full-Stack Developer
+    resume: ~/Documents/Resume/Yadav_Vijender_24oct.pdf
+  fullstack_ai:
+    label: Full-Stack + AI Engineer
+    resume: ~/Documents/Resume/Vijender_Yadav_FullStack_AI_Resume.pdf
+  flutter:
+    label: Flutter / Mobile Developer
+    resume: ~/Documents/Resume/Vijender_Yadav_Flutter_Resume.pdf
+
+# Filename recruiters see on the attachment, whichever track's PDF is sent.
+attachment_name: Vijender_Yadav_Resume.pdf
+
+search:
+  # Plain-English description of what you want. Claude judges eligibility against this.
+  looking_for: >
+    Software engineering internships (including 6-month internships starting in 2027)
+    and new-grad / entry-level full-time roles for the 2027 batch, needing at most
+    about 2 years of experience. In India (any city; onsite or hybrid is fine), or
+    remote roles that accept candidates living in India.
+  max_age_days: 30          # LinkedIn / HN posts older than this are skipped
+  ats_max_age_days: 90      # company-board roles are still open, so allow older ones
+  hn_who_is_hiring: true    # latest "Ask HN: Who is hiring?" thread
+  linkedin:
+    enabled: true           # read-only, logged out; never touches your account
+    location: India
+    pages_per_query: 2      # 10 results per page
+    queries:
+      - software engineer intern
+      - full stack developer
+      - flutter developer
+      - react node developer
+      - ai engineer
+  # Greenhouse / Lever / Ashby boards live in companies.yaml.
+
+scoring:
+  max_jobs_per_run: 60      # new jobs sent to Claude for scoring per run
+  batch_size: 8
+  min_score: 70             # 0-100; below this a job is ignored
+
+email:
+  auto_send: true           # false = only write drafts to outbox/
+  daily_cap: 20             # keep low so Gmail doesn't flag you as spam
+  min_gap_seconds: 60       # random pause between sends
+  max_gap_seconds: 180
+  company_cooldown_days: 45 # don't email the same company twice within this window
+
+apollo:
+  enabled: true             # needs APOLLO_API_KEY in .env
+  max_lookups_per_run: 20   # each email reveal costs Apollo credits
+  titles:
+    - technical recruiter
+    - recruiter
+    - talent acquisition
+    - engineering manager
+    - head of engineering
+    - cto
+    - founder
+
+notion:
+  # "Job Hunt" database: https://app.notion.com/p/41a34c387b9a8106a0ffda158c19213f
+  # Needs NOTION_TOKEN in .env and the integration connected to this database.
+  database_id: 41a34c387b9a8106a0ffda158c19213f
+
+claude:
+  bin: /opt/homebrew/bin/claude
+  model: sonnet

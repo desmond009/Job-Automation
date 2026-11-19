@@ -1,0 +1,7 @@
+.env
+.venv/
+jobs.db
+outbox/
+logs/
+.browser-profile/
+__pycache__/
