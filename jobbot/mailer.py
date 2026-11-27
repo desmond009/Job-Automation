@@ -4,6 +4,8 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
 
+import certifi
+
 
 def send(cfg, to, subject, body, resume_path):
     env, profile = cfg["env"], cfg["profile"]
@@ -15,6 +17,8 @@ def send(cfg, to, subject, body, resume_path):
     msg.set_content(body)
     msg.add_attachment(Path(resume_path).read_bytes(), maintype="application", subtype="pdf",
                        filename=cfg["attachment_name"])
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=60) as smtp:
+    # python.org builds of Python don't see the macOS keychain, so trust certifi's CA bundle.
+    context = ssl.create_default_context(cafile=certifi.where())
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=60) as smtp:
         smtp.login(env["GMAIL_ADDRESS"], env["GMAIL_APP_PASSWORD"].replace(" ", ""))
         smtp.send_message(msg)

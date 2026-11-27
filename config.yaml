@@ -35,8 +35,10 @@ search:
   looking_for: >
     Software engineering internships (including 6-month internships starting in 2027)
     and new-grad / entry-level full-time roles for the 2027 batch, needing at most
-    about 2 years of experience. In India (any city; onsite or hybrid is fine), or
-    remote roles that accept candidates living in India.
+    about 2 years of experience. Fully remote only, at startups and companies based
+    outside India, that accept candidates living and working from India. Onsite or
+    hybrid roles, and employers headquartered in India, are not wanted.
+  remote_only: true         # drop onsite/hybrid and region-locked remote roles before scoring
   max_age_days: 30          # LinkedIn / HN posts older than this are skipped
   ats_max_age_days: 90      # company-board roles are still open, so allow older ones
   hn_who_is_hiring: true    # latest "Ask HN: Who is hiring?" thread
@@ -65,7 +67,7 @@ email:
   company_cooldown_days: 45 # don't email the same company twice within this window
 
 apollo:
-  enabled: true             # needs APOLLO_API_KEY in .env
+  enabled: false            # needs APOLLO_API_KEY in .env
   max_lookups_per_run: 20   # each email reveal costs Apollo credits
   titles:
     - technical recruiter

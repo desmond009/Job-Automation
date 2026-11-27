@@ -114,32 +114,39 @@ def hn_who_is_hiring():
     story = next(h for h in hits if h["title"].startswith("Ask HN: Who is hiring?"))
     thread = session.get(f"https://hn.algolia.com/api/v1/items/{story['objectID']}", timeout=90).json()
     for post in thread.get("children", []):
-        if not post.get("text"):
-            continue
-        text = strip_html(post["text"])
-        first_line = text.split("\n", 1)[0]
-        urls = [u for u in URL_RE.findall(text) if "ycombinator.com" not in u]
-        emails = find_emails(text)
-        domain = next((e.split("@")[1] for e in emails if not e.endswith(("gmail.com", "proton.me"))), None)
-        if not domain and urls:
-            domain = urlparse(urls[0]).netloc.removeprefix("www.")
-        yield {
-            "id": f"hn:{post['id']}", "source": "hn",
-            "company": re.sub(r"\(.*?\)|https?://\S+", "", first_line.split("|")[0]).strip()[:80],
-            "domain": domain, "title": first_line[:200], "location": first_line[:200],
-            "url": f"https://news.ycombinator.com/item?id={post['id']}",
-            "apply_url": urls[0] if urls else None, "description": text, "emails": emails,
-            "posted_at": post.get("created_at"),
-        }
+        if post.get("text"):
+            yield hn_post(post)
 
 
-def linkedin(query, location, pages, max_age_days):
+def hn_post(post, source="hn"):
+    """Turn one HN "Who is hiring?" comment (Algolia item JSON) into a job."""
+    text = strip_html(post["text"])
+    first_line = text.split("\n", 1)[0]
+    urls = [u for u in URL_RE.findall(text) if "ycombinator.com" not in u]
+    emails = find_emails(text)
+    domain = next((e.split("@")[1] for e in emails if not e.endswith(("gmail.com", "proton.me"))), None)
+    if not domain and urls:
+        domain = urlparse(urls[0]).netloc.removeprefix("www.")
+    return {
+        "id": f"hn:{post['id']}", "source": source,
+        "company": re.sub(r"\(.*?\)|https?://\S+", "", first_line.split("|")[0]).strip()[:80],
+        "domain": domain, "title": first_line[:200], "location": first_line[:200],
+        "url": f"https://news.ycombinator.com/item?id={post['id']}",
+        "apply_url": urls[0] if urls else None, "description": text, "emails": emails,
+        "posted_at": post.get("created_at"),
+    }
+
+
+def linkedin(query, location, pages, max_age_days, remote_only=False):
     """Public, logged-out job search. Read-only, so your LinkedIn account is never involved."""
     for page in range(pages):
-        r = session.get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search", timeout=30, params={
+        params = {
             "keywords": query, "location": location, "f_E": "1,2",  # internship, entry level
             "f_TPR": f"r{max_age_days * 86400}", "sortBy": "DD", "start": page * 10,
-        })
+        }
+        if remote_only:
+            params["f_WT"] = "2"  # remote roles open to people in `location`
+        r = session.get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search", timeout=30, params=params)
         if r.status_code != 200:
             break
         cards = r.text.split("<li>")[1:]
@@ -208,7 +215,8 @@ def fetch_all(cfg, log):
         count = 0
         for query in li["queries"]:
             try:
-                for job in linkedin(query, li["location"], li["pages_per_query"], search["max_age_days"]):
+                for job in linkedin(query, li["location"], li["pages_per_query"], search["max_age_days"],
+                                    search.get("remote_only")):
                     count += 1
                     yield job
             except Exception as e:

@@ -28,7 +28,8 @@ def ask(prompt, cfg, timeout=300):
 def ask_json(prompt, cfg):
     """Ask for JSON and parse the first object or array in the reply."""
     text = ask(prompt, cfg)
-    match = re.search(r"(\[.*\]|\{.*\})", text, re.S)
+    # raw_decode stops at the end of the first value, so prose after the JSON is ignored.
+    match = re.search(r"[\[{]", text)
     if not match:
         raise ClaudeError(f"no JSON in reply: {text[:300]}")
-    return json.loads(match.group(1))
+    return json.JSONDecoder().raw_decode(text, match.start())[0]

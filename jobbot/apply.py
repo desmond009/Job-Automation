@@ -79,7 +79,11 @@ def run(cfg, limit):
                     print(f"    filled: {', '.join(fill(page, cfg['profile'], resume)) or 'nothing (fill by hand)'}")
             except Exception as e:
                 print(f"    could not load/fill: {e}")
-            answer = input("    [a]pplied  [s]kip  [l]ater  [q]uit > ").strip().lower()[:1]
+            try:
+                answer = input("    [a]pplied  [s]kip  [l]ater  [q]uit > ").strip().lower()[:1]
+            except EOFError:  # no keyboard attached (e.g. run from Claude's `!` prompt)
+                print("\n    No terminal input available; run `./jobs apply` in Terminal.")
+                break
             if answer == "a":
                 db.update(conn, job["id"], apply_state="applied", applied_at=_now())
             elif answer == "s":

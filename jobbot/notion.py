@@ -15,7 +15,8 @@ import requests
 API = "https://api.notion.com/v1"
 VERSION = "2022-06-28"
 
-SOURCES = {"linkedin": "LinkedIn", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "keka": "Keka", "hn": "HN"}
+SOURCES = {"linkedin": "LinkedIn", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "keka": "Keka", "hn": "HN",
+           "sheet": "Imported"}
 TRACKS = {"fullstack": "Full-Stack", "fullstack_ai": "Full-Stack + AI", "flutter": "Flutter"}
 PIPELINE = ("To apply", "Email drafted", "Emailed")  # statuses the script owns
 DONE_BY_USER = {"Applied": "applied", "Interview": "applied", "Offer": "applied",

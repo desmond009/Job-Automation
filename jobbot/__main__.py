@@ -4,6 +4,7 @@
   ./jobs apply [--limit N]   open matched jobs' application forms, pre-filled, for you to submit
   ./jobs status              counts, today's sends, and the top of the apply queue
   ./jobs sync                push to / pull from the Notion "Job Hunt" database
+  ./jobs import FILE.xlsx    add HN hiring posts linked from a spreadsheet, pre-filtered
   ./jobs schedule on|off     run daily via launchd (default 10:00)
 """
 import argparse
@@ -16,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import apply, contacts, db, mailer, match, notion, sources, writer
+from . import apply, contacts, db, mailer, match, notion, sheet, sources, writer
 from .config import ROOT, load
 from .llm import ClaudeError
 
@@ -40,7 +41,8 @@ def cmd_run(cfg, dry_run):
     pending = [db.as_dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = 'new'")]
     keep = []
     for job in pending:
-        reason = match.prefilter(job, cfg["search"]["max_age_days"], cfg["search"]["ats_max_age_days"])
+        reason = match.prefilter(job, cfg["search"]["max_age_days"], cfg["search"]["ats_max_age_days"],
+                                 cfg["search"].get("remote_only"))
         if reason:
             db.update(conn, job["id"], status="rejected", reason=f"prefilter: {reason}")
         else:
@@ -143,6 +145,34 @@ def cmd_run(cfg, dry_run):
     cmd_status(cfg, brief=True)
 
 
+def cmd_import(cfg, path):
+    """Insert the sheet's posts as new jobs and pre-filter them now, so the list
+    you see is what the next `./jobs run` will score."""
+    conn = db.connect()
+    search = cfg["search"]
+    log(f"Importing {path}")
+    jobs = list(sheet.fetch_jobs(path, search["ats_max_age_days"], log))
+    known = {r[0] for r in conn.execute(
+        f"SELECT id FROM jobs WHERE id IN ({','.join('?' * len(jobs))})", [j["id"] for j in jobs])}
+    new = [j for j in jobs if j["id"] not in known]
+    db.insert_new(conn, new)
+    log(f"  {len(jobs)} posts fetched; {len(known)} already in jobs.db, {len(new)} added")
+
+    drops, kept = {}, []
+    for job in new:
+        reason = match.prefilter(job, search["max_age_days"], search["ats_max_age_days"], search.get("remote_only"))
+        if reason:
+            drops[reason] = drops.get(reason, 0) + 1
+            db.update(conn, job["id"], status="rejected", reason=f"prefilter: {reason}")
+        else:
+            kept.append(job)
+    log(f"  dropped by pre-filter: {', '.join(f'{n} {r}' for r, n in drops.items()) or 'none'}")
+    log(f"  {len(kept)} left for Claude to score on the next `./jobs run`:")
+    for job in sorted(kept, key=match.priority):
+        mail = f"  <{job['emails'][0]}>" if job["emails"] else ""
+        print(f"    {job['posted_at'][:10]}  {job['title'][:90]}{mail}")
+
+
 def write_outbox(cfg, drafts):
     folder = ROOT / "outbox" / today()
     folder.mkdir(parents=True, exist_ok=True)
@@ -215,6 +245,8 @@ def main():
     ap.add_argument("--limit", type=int, default=15)
     sub.add_parser("status", help="show counts and the apply queue")
     sub.add_parser("sync", help="sync with the Notion Job Hunt database")
+    im = sub.add_parser("import", help="add HN hiring posts linked from a spreadsheet")
+    im.add_argument("file", type=Path)
     sc = sub.add_parser("schedule", help="turn the daily run on or off")
     sc.add_argument("state", choices=["on", "off"])
     sc.add_argument("--at", default="10:00", help="HH:MM, 24h")
@@ -229,6 +261,8 @@ def main():
         cmd_status(cfg)
     elif args.cmd == "sync":
         notion.sync(db.connect(), cfg, log)
+    elif args.cmd == "import":
+        cmd_import(cfg, args.file.expanduser())
     elif args.cmd == "schedule":
         cmd_schedule(args.state, args.at)
 

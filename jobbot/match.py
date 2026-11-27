@@ -23,6 +23,9 @@ INDIA = re.compile(r"india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|gurug
                    r"chennai|kolkata|ahmedabad|jaipur|kochi|dharwad|hubli|karnataka", re.I)
 REMOTE = re.compile(r"remote", re.I)
 WORLDWIDE = re.compile(r"anywhere|worldwide|global|international|distributed|apac|asia|any time ?zone", re.I)
+# A remote headline naming one of these (and no worldwide signal) can't hire someone in India.
+REGION_LOCKED = re.compile(r"\b(US|USA|U\.S\.?|UK|EU|EST|PST|CET|ET|PT)\b|(?i:united states|north america|americas|"
+                           r"canada|europe|emea|latam|germany|poland|romania|netherlands|france|spain|brazil)")
 # What's left of a location once the word "remote" and filler are removed; empty means "Remote" with no region.
 REMOTE_FILLER = re.compile(r"remote|first|friendly|only|hybrid|in|or|and|\W|\d", re.I)
 TRACK_SKILLS = re.compile(
@@ -30,14 +33,18 @@ TRACK_SKILLS = re.compile(
     r"python|fastapi|llm|agent|langgraph|rag|\bai\b|web", re.I)
 
 
-def prefilter(job, max_age_days, ats_max_age_days):
+def prefilter(job, max_age_days, ats_max_age_days, remote_only=False):
     """Return None if the job is worth scoring, else the reason to drop it.
 
+    remote_only keeps just remote roles that could hire someone living in India;
+    Claude then checks the full posting.
+
     Company boards only list open roles, so they get a longer age limit than
-    LinkedIn/HN, where old posts are usually stale.
+    LinkedIn/HN, where old posts are usually stale. HN posts imported from a
+    spreadsheet (source "sheet") were picked by hand, so they get it too.
     """
     title, loc = job["title"] or "", job["location"] or ""
-    if job["source"] in ("greenhouse", "lever", "ashby", "keka"):
+    if job["source"] in ("greenhouse", "lever", "ashby", "keka", "sheet"):
         max_age_days = ats_max_age_days
     if job.get("posted_at"):
         try:
@@ -49,11 +56,20 @@ def prefilter(job, max_age_days, ats_max_age_days):
         except ValueError:
             pass
 
-    if job["source"] == "hn":
+    if job["source"] in ("hn", "sheet"):
         # The whole post is the posting; titles are free text.
         text = job.get("description") or ""
         if not TRACK_SKILLS.search(text):
             return "no matching stack"
+        if remote_only:
+            # Posts are often one paragraph; the "Company | Role | Location |" headline ends at the last pipe.
+            line = text.split("\n", 1)[0]
+            headline = line[: line.rfind("|") + 40] if "|" in line else line[:200]
+            if not (REMOTE.search(text) or WORLDWIDE.search(text)):
+                return "not remote"
+            if REGION_LOCKED.search(headline) and not (INDIA.search(headline) or WORLDWIDE.search(headline)):
+                return "location"
+            return None
         # "REMOTE" alone on HN almost always means US-only, so ask for India or a worldwide signal.
         if not (INDIA.search(text) or WORLDWIDE.search(text)):
             return "location"
@@ -63,6 +79,15 @@ def prefilter(job, max_age_days, ats_max_age_days):
         return "too senior"
     if NON_ENG.search(title) or not ENG.search(title):
         return "not engineering"
+    if remote_only:
+        # LinkedIn is searched with its remote filter and shows only the country as location.
+        if job["source"] == "linkedin" or not loc.strip():
+            return None
+        if not (REMOTE.search(loc) or WORLDWIDE.search(loc)):
+            return "not remote"
+        if INDIA.search(loc) or WORLDWIDE.search(loc) or not REMOTE_FILLER.sub("", loc):
+            return None
+        return "location"
     if not loc.strip() or INDIA.search(loc) or WORLDWIDE.search(loc):
         return None
     if REMOTE.search(loc) and not REMOTE_FILLER.sub("", loc):
@@ -71,9 +96,10 @@ def prefilter(job, max_age_days, ats_max_age_days):
 
 
 def priority(job):
-    """Explicit entry-level titles first, then India-based, then newest."""
-    text = f"{job['title']} {(job.get('description') or '')[:300] if job['source'] == 'hn' else ''}"
-    return (not ENTRY.search(text), not INDIA.search(job["location"] or ""), _neg_time(job.get("posted_at")))
+    """Explicit entry-level titles first, then India-based or worldwide, then newest."""
+    text = f"{job['title']} {(job.get('description') or '')[:300] if job['source'] in ('hn', 'sheet') else ''}"
+    loc = job["location"] or ""
+    return (not ENTRY.search(text), not (INDIA.search(loc) or WORLDWIDE.search(loc)), _neg_time(job.get("posted_at")))
 
 
 def _neg_time(value):
@@ -99,9 +125,9 @@ For each job decide:
 - eligible: true only if BOTH hold:
   (a) level: an internship, a new-grad / 2027-batch role, or a role needing at most ~2 years of
       experience. If the posting requires 3+ years, it is NOT eligible.
-  (b) location: based in India, or remote AND open to people living in India. Remote roles limited
-      to the US, Europe, or other regions are NOT eligible. Relocation abroad / visa sponsorship
-      roles are NOT eligible.
+  (b) location: fits WHAT THE CANDIDATE WANTS above, and the candidate keeps living in India.
+      Remote roles limited to the US, Europe, or other regions are NOT eligible. Relocation abroad /
+      visa sponsorship roles are NOT eligible.
   For "Who is hiring" posts that list several roles, judge the most junior relevant one.
 - score: 0-100, how well the candidate's real skills match what the job needs (independent of eligible).
 - track: one of {track_ids}
