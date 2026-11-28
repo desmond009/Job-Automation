@@ -76,3 +76,27 @@ def from_apollo(job, cfg, api_key):
         if "@" in email and "not_unlocked" not in email and match.get("email_status") == "verified":
             return {"email": email.lower(), "name": match.get("first_name"), "title": match.get("title")}
     return None
+
+
+def from_founders(job):
+    """Founder-outreach lead: an email on the company site that belongs to a founder,
+    else a general address printed there (hello@, founders@...), else a guessed
+    firstname@domain when the domain receives mail."""
+    from .founders import founders_of, has_mx
+
+    people = founders_of(job)
+    first = people[0][0] if people else None
+    emails = [e for e in job.get("emails") or [] if not BAD_LOCAL.match(e)]
+    for e in emails:
+        local = e.split("@")[0]
+        for fname, full in people:
+            parts = [p.lower() for p in re.findall(r"[A-Za-z]+", full)]
+            if any(len(p) > 2 and p in local for p in (parts[:1] + parts[-1:])):
+                return {"email": e, "name": fname, "title": "Co-founder"}
+    general = sorted(emails, key=lambda e: not GOOD_LOCAL.search(e.split("@")[0]))
+    if general:
+        return {"email": general[0], "name": first, "title": "Co-founder (company address)"}
+    domain = job.get("domain")
+    if first and domain and re.fullmatch(r"[A-Za-z]+", first) and has_mx(domain):
+        return {"email": f"{first.lower()}@{domain}", "name": first, "title": "Co-founder (guessed address)"}
+    return None

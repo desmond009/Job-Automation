@@ -37,6 +37,35 @@ Rules:
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
 
+OUTREACH_PROMPT = """Write a short cold email from a final-year CS student to a startup founder, asking
+for a remote software engineering internship. The startup has NOT posted a job.
+
+SENDER'S RESUME (the ONLY source of facts about the sender)
+{resume}
+
+STARTUP
+{description}
+
+RECIPIENT
+{recipient}
+
+Rules:
+- Start the body with exactly: "{greeting}"
+- 80 to 140 words in the body. Plain text, short paragraphs, no markdown, no bullet points.
+- First line after the greeting: who you are (B.Tech CSE at IIIT Dharwad, graduating 2027, based in India)
+  and that you would like to intern remotely with them.
+- One sentence showing you understand what they build, from the startup info above. No flattery.
+- Two concrete achievements from the resume, with their real numbers, picked because they are the kind of
+  work this product needs. Say in plain words how that would help them.
+- End by saying the resume is attached and asking for a short call or a small trial task.
+- Use ONLY facts in the resume. Never invent skills, experience, numbers, dates, or availability.
+- Sound like a sharp, direct student. No em dashes. Never use: "passionate", "leverage", "excited to",
+  "I am writing to", "I hope this email finds you", "synergy", "thrilled", "delve".
+- Do not add a sign-off or signature; it is added automatically.
+- Subject: under 70 characters, names their company, mentions remote internship and IIIT Dharwad '27.
+
+Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
+
 LEGAL_SUFFIX = re.compile(r"[\s,]*\b(pvt\.?|private|ltd\.?|limited|inc\.?|llc|llp|corp\.?|gmbh|co\.)(?=\s|$)", re.I)
 
 BANNED = re.compile(r"\[|\]|\{|\}|passionate|leverage|I am writing to|hope this (email|message) finds", re.I)
@@ -54,11 +83,15 @@ def write(job, contact, cfg):
     greeting = f"Hi {first}," if first else f"Hi {LEGAL_SUFFIX.sub('', job['company']).strip()} team,"
     recipient = (f"{contact.get('name')} ({contact.get('title') or 'title unknown'})"
                  if contact.get("name") else "Unknown person at the company's hiring address.")
-    prompt = EMAIL_PROMPT.format(
-        resume=resume_text(cfg["tracks"][job["track"]]["resume"]),
-        company=job["company"], title=job["title"], location=job["location"],
-        description=(job.get("description") or "")[:3500], recipient=recipient, greeting=greeting,
-    )
+    resume = resume_text(cfg["tracks"][job["track"]]["resume"])
+    description = (job.get("description") or "")[:3500]
+    if job["source"] == "yc":
+        prompt = OUTREACH_PROMPT.format(resume=resume, description=description, recipient=recipient,
+                                        greeting=greeting)
+    else:
+        prompt = EMAIL_PROMPT.format(resume=resume, company=job["company"], title=job["title"],
+                                     location=job["location"], description=description,
+                                     recipient=recipient, greeting=greeting)
     problem = None
     for _ in range(2):
         draft = llm.ask_json(prompt, cfg)

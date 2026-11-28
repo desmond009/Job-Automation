@@ -7,12 +7,30 @@ go through the same pre-filter, scoring and contact steps.
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .sources import hn_post, session
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 HN_ITEM = re.compile(r"news\.ycombinator\.com/item\?id=(\d+)")
+
+
+GSHEET = re.compile(r"docs\.google\.com/spreadsheets/d/([\w-]+)")
+
+
+def local_copy(path):
+    """A local .xlsx for a file path or a Google Sheets link (the sheet must be viewable by link)."""
+    m = GSHEET.search(str(path))
+    if not m:
+        return Path(path).expanduser()
+    r = session.get(f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=xlsx", timeout=60)
+    if not r.ok or not r.content.startswith(b"PK"):
+        raise ValueError(f"could not download the sheet (HTTP {r.status_code}); is it shared as 'anyone with the link'?")
+    out = Path(tempfile.gettempdir()) / f"jobbot-{m.group(1)}.xlsx"
+    out.write_bytes(r.content)
+    return out
 
 
 def read_rows(path):

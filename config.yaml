@@ -39,6 +39,7 @@ search:
     outside India, that accept candidates living and working from India. Onsite or
     hybrid roles, and employers headquartered in India, are not wanted.
   remote_only: true         # drop onsite/hybrid and region-locked remote roles before scoring
+  founders_india_only: true # founder-outreach sheets: only startups based in India or with an Indian founder
   max_age_days: 30          # LinkedIn / HN posts older than this are skipped
   ats_max_age_days: 90      # company-board roles are still open, so allow older ones
   hn_who_is_hiring: true    # latest "Ask HN: Who is hiring?" thread

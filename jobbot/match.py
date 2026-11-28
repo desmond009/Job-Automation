@@ -33,7 +33,7 @@ TRACK_SKILLS = re.compile(
     r"python|fastapi|llm|agent|langgraph|rag|\bai\b|web", re.I)
 
 
-def prefilter(job, max_age_days, ats_max_age_days, remote_only=False):
+def prefilter(job, max_age_days, ats_max_age_days, remote_only=False, india_only=False):
     """Return None if the job is worth scoring, else the reason to drop it.
 
     remote_only keeps just remote roles that could hire someone living in India;
@@ -44,6 +44,19 @@ def prefilter(job, max_age_days, ats_max_age_days, remote_only=False):
     spreadsheet (source "sheet") were picked by hand, so they get it too.
     """
     title, loc = job["title"] or "", job["location"] or ""
+    if job["source"] == "yc":
+        # Founder outreach: no posting, level or location to check; the ask is a remote internship.
+        desc = job.get("description") or ""
+        if "(site unreachable)" in desc:
+            return "website down"
+        if india_only and not re.search(r"^India link: (HQ in India|Indian founder)", desc, re.M):
+            return "no India link"
+        if "India link: HQ in India" in desc:
+            return None  # few of these; let Claude judge the product
+        about = desc.split("\n\n", 1)[-1].replace("From their website:", "")
+        if not TRACK_SKILLS.search(re.sub(r"https?://\S+", "", about)):
+            return "no matching stack"
+        return None
     if job["source"] in ("greenhouse", "lever", "ashby", "keka", "sheet"):
         max_age_days = ats_max_age_days
     if job.get("posted_at"):
@@ -96,10 +109,12 @@ def prefilter(job, max_age_days, ats_max_age_days, remote_only=False):
 
 
 def priority(job):
-    """Explicit entry-level titles first, then India-based or worldwide, then newest."""
+    """Real postings before founder-outreach leads (India-HQ startups first); then explicit entry-level titles,
+    India-based or worldwide, newest."""
     text = f"{job['title']} {(job.get('description') or '')[:300] if job['source'] in ('hn', 'sheet') else ''}"
     loc = job["location"] or ""
-    return (not ENTRY.search(text), not (INDIA.search(loc) or WORLDWIDE.search(loc)), _neg_time(job.get("posted_at")))
+    yc = job["source"] == "yc"
+    return (yc, yc and "India link: HQ in India" not in (job.get("description") or ""), not ENTRY.search(text), not (INDIA.search(loc) or WORLDWIDE.search(loc)), _neg_time(job.get("posted_at")))
 
 
 def _neg_time(value):
@@ -129,6 +144,10 @@ For each job decide:
       Remote roles limited to the US, Europe, or other regions are NOT eligible. Relocation abroad /
       visa sponsorship roles are NOT eligible.
   For "Who is hiring" posts that list several roles, judge the most junior relevant one.
+  For "Founder outreach" entries there is no posting: the candidate would cold-email the founders
+  asking for a remote internship. Skip (a) and (b); eligible = the company builds software, web,
+  mobile or AI products where the candidate's skills would genuinely help, and is not a hardware,
+  biotech, lab or other mostly non-software business. Score how well the resume fits their product.
 - score: 0-100, how well the candidate's real skills match what the job needs (independent of eligible).
 - track: one of {track_ids}
 - reason: at most 15 words.

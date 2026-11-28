@@ -4,7 +4,8 @@
   ./jobs apply [--limit N]   open matched jobs' application forms, pre-filled, for you to submit
   ./jobs status              counts, today's sends, and the top of the apply queue
   ./jobs sync                push to / pull from the Notion "Job Hunt" database
-  ./jobs import FILE.xlsx    add HN hiring posts linked from a spreadsheet, pre-filtered
+  ./jobs import FILE|URL     add HN hiring posts or YC founder leads from a spreadsheet
+                             (.xlsx or a Google Sheets link), pre-filtered
   ./jobs schedule on|off     run daily via launchd (default 10:00)
 """
 import argparse
@@ -17,7 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import apply, contacts, db, mailer, match, notion, sheet, sources, writer
+from . import apply, contacts, db, founders, mailer, match, notion, sheet, sources, writer
 from .config import ROOT, load
 from .llm import ClaudeError
 
@@ -42,7 +43,7 @@ def cmd_run(cfg, dry_run):
     keep = []
     for job in pending:
         reason = match.prefilter(job, cfg["search"]["max_age_days"], cfg["search"]["ats_max_age_days"],
-                                 cfg["search"].get("remote_only"))
+                                 cfg["search"].get("remote_only"), cfg["search"].get("founders_india_only"))
         if reason:
             db.update(conn, job["id"], status="rejected", reason=f"prefilter: {reason}")
         else:
@@ -90,7 +91,7 @@ def cmd_run(cfg, dry_run):
         if busy:
             continue
 
-        contact = contacts.from_posting(job)
+        contact = contacts.from_founders(job) if job["source"] == "yc" else contacts.from_posting(job)
         if not contact and apollo_key and lookups < cfg["apollo"]["max_lookups_per_run"]:
             lookups += 1
             try:
@@ -151,16 +152,28 @@ def cmd_import(cfg, path):
     conn = db.connect()
     search = cfg["search"]
     log(f"Importing {path}")
-    jobs = list(sheet.fetch_jobs(path, search["ats_max_age_days"], log))
-    known = {r[0] for r in conn.execute(
-        f"SELECT id FROM jobs WHERE id IN ({','.join('?' * len(jobs))})", [j["id"] for j in jobs])}
-    new = [j for j in jobs if j["id"] not in known]
-    db.insert_new(conn, new)
-    log(f"  {len(jobs)} posts fetched; {len(known)} already in jobs.db, {len(new)} added")
+    path = sheet.local_copy(path)
+    rows = sheet.read_rows(path)
+    if founders.is_founder_sheet(rows):
+        known = {r[0] for r in conn.execute("SELECT id FROM jobs WHERE source = 'yc'")}
+        new, down = founders.fetch_leads(rows, known, log)
+        if search.get("founders_india_only"):
+            log("  checking which startups are India-based or have an Indian founder")
+            founders.tag_india([j for j in new if j["id"] not in down], cfg, log)
+        db.insert_new(conn, new)
+        log(f"  {len(new)} founder leads added ({len(down)} with a dead website); companies already in jobs.db skipped")
+    else:
+        jobs = list(sheet.fetch_jobs(path, search["ats_max_age_days"], log))
+        known = {r[0] for r in conn.execute(
+            f"SELECT id FROM jobs WHERE id IN ({','.join('?' * len(jobs))})", [j["id"] for j in jobs])}
+        new = [j for j in jobs if j["id"] not in known]
+        db.insert_new(conn, new)
+        log(f"  {len(jobs)} posts fetched; {len(known)} already in jobs.db, {len(new)} added")
 
     drops, kept = {}, []
     for job in new:
-        reason = match.prefilter(job, search["max_age_days"], search["ats_max_age_days"], search.get("remote_only"))
+        reason = match.prefilter(job, search["max_age_days"], search["ats_max_age_days"], search.get("remote_only"),
+                                 search.get("founders_india_only"))
         if reason:
             drops[reason] = drops.get(reason, 0) + 1
             db.update(conn, job["id"], status="rejected", reason=f"prefilter: {reason}")
@@ -170,7 +183,8 @@ def cmd_import(cfg, path):
     log(f"  {len(kept)} left for Claude to score on the next `./jobs run`:")
     for job in sorted(kept, key=match.priority):
         mail = f"  <{job['emails'][0]}>" if job["emails"] else ""
-        print(f"    {job['posted_at'][:10]}  {job['title'][:90]}{mail}")
+        what = job["company"] if job["source"] == "yc" else job["title"]
+        print(f"    {(job['posted_at'] or '')[:10]:<10}  {what[:90]}{mail}")
 
 
 def write_outbox(cfg, drafts):
@@ -245,8 +259,8 @@ def main():
     ap.add_argument("--limit", type=int, default=15)
     sub.add_parser("status", help="show counts and the apply queue")
     sub.add_parser("sync", help="sync with the Notion Job Hunt database")
-    im = sub.add_parser("import", help="add HN hiring posts linked from a spreadsheet")
-    im.add_argument("file", type=Path)
+    im = sub.add_parser("import", help="add HN hiring posts or YC founder leads from a spreadsheet")
+    im.add_argument("file", help=".xlsx path or Google Sheets link")
     sc = sub.add_parser("schedule", help="turn the daily run on or off")
     sc.add_argument("state", choices=["on", "off"])
     sc.add_argument("--at", default="10:00", help="HH:MM, 24h")
@@ -262,7 +276,7 @@ def main():
     elif args.cmd == "sync":
         notion.sync(db.connect(), cfg, log)
     elif args.cmd == "import":
-        cmd_import(cfg, args.file.expanduser())
+        cmd_import(cfg, args.file)
     elif args.cmd == "schedule":
         cmd_schedule(args.state, args.at)
 
